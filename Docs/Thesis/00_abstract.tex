@@ -1,0 +1,27 @@
+\cleardoublepage
+\noindent
+%{\Huge \textbf{Abstract}}
+%\vspace{8ex}
+\chapter*{Abstract}
+
+The thesis explores an algorithm for finding potential deadlocks in parallel programs written for the .NET Framework. Our goal is to simplify testing of parallel programs and to determine places in the code that could possibly cause problems and that should be examined as a part of the software testing life cycle.
+
+We present a design and implementation of an algorithm for finding these potential deadlock possibilities by construction of a lock-order graph by a static code analysis. This graph represents the order in which locks are acquired by the program. Cycles in the graph indicate deadlock possibilities, and our tool reports them.
+
+We evaluated the implementation on one commercial application and identified that 4 out of the 40 reported possibilities may lead to a deadlock. 
+
+\vglue60mm
+
+\begin{flushright}
+{\noindent{\huge {Abstrakt}}}
+\vskip 2.75\baselineskip
+\end{flushright}
+
+{\selectlanguage{czech}
+\noindent
+Tato práce zkoumá algoritmus pro hledání potenciálních uváznutí v paralelních programech napsaných pro .NET Framework. Našim cílém je usnadnění testování paralelních programů a nalezení míst v kódu, kde by potenciálně mohlo dojít k uváznutí, aby mohla tato místa být prozkoumána v rámci životního cyklu testování softwaru.
+
+Představujeme návrh a implementaci algoritmu pro nalezení potenciálních uváznutí pomocí sestrojení lock-order grafu statickou analýzou kódu. Tento graf reprezenuje pořadí, v němž jsou zámky programem uzamykány. Smyčky v tomto grafu reprezentují možná uváznutí a náš nástroj tato možná uváznutí vypisuje.
+
+Implementaci jsme vyhodnotili spuštěním na komerční aplikaci, kde jsme ověřili, že z 40 vypsaných možností uváznutí vedou 4 na skutečná uváznutí v programu.
+}

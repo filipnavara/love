@@ -1,0 +1,46 @@
+\myepigraph{In fact what I would like to see is thousands of computer scientists let loose to do whatever they want. That's what really advances the field.}%
+         {Donald Knuth}
+\chapter{Related works}
+         
+\section{Run-time deadlock detection}
+
+The classic approach to deadlock detection in object-oriented programs is run-time detection with the \emph{GoodLock} algorithm \citep{Havelund2000}. The algorithm works by building a lock order graph by intercepting the locking calls of a running program. The resulting graph is examined for a presence of cycles. The original algorithm detects only deadlocks caused by two resources; a variant called \emph{generalized GoodLock} \citep{Agarwal2005,Agarwal2006} extends the algorithm to handle an arbitrary number of resources. Most run-time algorithms are only variations of the GoodLock algorithm that improve upon it by reducing false positives and providing additional information to track a source of the deadlocks.
+
+\section{Data-flow analyses}
+
+Using static program analysis to find deadlocks in programs isn't a novel approach either. Several techniques have been developed \citep{Artho2001,Praun2004,Jlint} and each of them has its own benefits and drawbacks. In the context of object-oriented languages, most of the work was focused on Java.
+
+To the best of our knowledge, the Jlint static checker \citep{Jlint} is the first tool to use the lock order graph. The original implementation of the tool considers only synchronized methods and it doesn't model synchronized blocks (equivalent of lock blocks in C\#). Artho and Biere \citep{Artho2001} extended the tool to support synchronized blocks. The Jlint analysis is very simplistic and detects only a small subset of potentials deadlocks. The main drawbacks include: 1) fields and local variables are considered to be unaliased, 2) nested synchronized blocks are not tracked across class boundaries, and 3) inheritance is not fully considered.
+
+A part of the original Jlint tool was ported to .NET Framework 1.0 as CSLint \citep{CSLint}. It was even more limited than the original Java tool. Several ports to .NET Framework 2.0 were later introduced, which added a partial support for generics, but the limitations of the original Jlint tool remained.
+
+Christopher von Praun has written a PhD thesis \citep{Praun2004} dedicated to finding multi-threading problems, such as race conditions, atomicity violations and deadlocks, in Java programs. His work has provided significant contribution to further research of static analysis of parallel programs. One of the key ideas suggested by the thesis was that alias analysis is a key component of the static deadlock detection techniques.
+
+A sophisticated interprocedural data-flow analysis is described by \citet{Williams2005} that builds a lock order graph. The analysis is targeted at verifying program libraries as opposed to whole programs. Contrary to Jlint the analysis correctly takes inheritance into account and the interprocedural approach provides better value tracking and also properly treats the reentrancy of locks.
+
+Naik has co-written a significant number of research papers with regard to static analysis of concurrent programs \citep{Naik2006,Naik2008,Naik2009}. The effort has resulted in development of the JChord tool \citep{jchord}. The tool uses an innovative combination of static analyses ($k$-CFA call graph and alias analysis, thread escape analysis, may happen in parallel analysis) to search for data races and deadlocks. It attacks the deadlock detection problem by scanning each tuple $(t_a,l_a^1,l_a^2,t_b,l_b^1,l_b^2)$, where $t_a$ and $t_b$ are threads and $l_a^1$, $l_a^2$, $l_b^1$ and $l_b^2$ are locks, for satisfying six deadlock conditions:
+\begin{itemize*}
+\item \emph{reachability} \newline Is it possible to find a code path, where lock $l_a^1$ is taken and then lock $l_a^2$ is acquired in thread $t_a$ (and equivalently for $l_b^1$, $l_b^2$ and $t_b$)?
+\item \emph{aliasing} \newline Can lock $l_a^1$ be the same lock as $l_b^2$ (and equivalently for $l_b^1$ and $l_a^2$)?
+\item \emph{escaping} \newline Can lock $l_a^1$ be accessible from more than one thread (and similarly for $l_a^2$, $l_b^1$ and $l_b^2$)?
+\item \emph{parallel} \newline Can different threads $t_a$ and $t_b$ simultaneously reach $l_a^2$ and $l_b^2$?
+\item \emph{non-reentrancy}
+\item \emph{no guard lock}
+\end{itemize*}
+The first four conditions are verified soundly, while the last two are approximated. The $k$-CFA analysis is run iteratively with increasing $k$ context-sensitivity for as long as the number of reports decreases. This significantly reduces the number of false positives while the analysis remains computationally feasible. A shortcoming of the analysis is that it cannot detect deadlocks caused by three or more locks waiting in a circular chain.
+
+\section{Model checking}
+
+Several groups have taken a model-checking approach to finding deadlocks in Java programs. The best known tool is Java Pathfinder \citep{Havelund1999,Brat2000} that translates Java into Promela language, which is then verified using the SPIN model checker. The tool is very precise at the expense of analysis time.
+
+A model checking for \emph{Mono}, an open-source .NET Framework implementation, was implemented in the MoonWalker tool \citep{AanDeBrugh2009}. The tool analyzes .NET byte code and interprets it along all possible code paths. This makes it unsuitable for use on large programs. There were further problems with the implementation itself, most notably: 1) the tool is tied closely to the Mono run-time due to dependency on the specific Base Class Library implementation and its internals, and 2) bugs in the type handling code prevent it from working even on the simplest programs\footnote{For example, the type handling code doesn't keep track of type of delegates, thus it incorrectly emulates a code such as \texttt{if (delegateVariable is ThreadStart) \{ ... \}}.}.
+
+The common problem with the model checking approach is that it is not scalable to large programs. Various techniques have been developed to reduce the search space, such as over-abstracting the model or combining it with data-flow analysis to identify places where additional precision is needed \citep{Brown2007}.
+
+\section{Petri nets}
+
+Petri Nets have a large body of research, both theoretical and practical, sup-porting their use for concurrent system analysis. Bateman and Pouarz have presented a paper \citep{Bateman2002} that examined how to transform Java concurrency to Petri Net representation. The Petri Nets offer very flexible representation that allows modeling complex synchronization primitives such as Semaphore, ReaderWriterLock or even unbalanced locks across multiple methods. However, they do not inherently allow modeling of reentrant locks. While many deadlock preserving reductions exist that reduce the search space, finding a deadlock in a Petri Net is still a problem with exponential complexity.    
+
+\section{Companion tools for testing}
+
+A new class of tools has recently appeared that uses the results of imprecise static or dynamic program analyses. The imprecise analysis is run first on the program to identify potential concurrency bugs. In a second phase the reports from the imprecise analysis are used to explicitly control the underlying scheduler of the concurrent program to accurately and quickly reproduce real concurrency bugs, if present, with high precision. Prominent examples of these tools are CalFuzzer \citep{Joshi2009} for Java, CHESS \citep{Musuvathi2007} for Win32 and .NET applications, and TypeMock Racer \citep{TypeMockRacer} for .NET.

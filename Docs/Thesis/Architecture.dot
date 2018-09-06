@@ -1,0 +1,23 @@
+digraph Architecture {
+  subgraph cluster_StaticAnalysis {
+    "Call graph" -> "Class hierarchy\ngraph"
+    "Call graph" -> "Data-flow\nanalysis"
+    "Call graph" -> "Alias analysis" [style=dotted]
+    "Data-flow\nanalysis" -> "Control-flow\nanalysis"
+    "Alias analysis" [style=dotted]
+    label="Static Analysis"
+  }
+  subgraph cluster_LovePrototype {
+    "Lock order graph" -> "Interprocedural data-flow analysis"
+    label="LovePrototype"
+  }
+  subgraph cluster_LockGraphAnalyzer {
+    "Detection of\ncycles in lock\norder graph" -> "Pruning of cycles\nwith guard locks"
+    "Pruning of cycles\nwith guard locks" -> "Counter-example\nreporting"
+    label="Lock Graph Analyzer"
+  }
+  "Interprocedural data-flow analysis" -> "Call graph"
+  "Interprocedural data-flow analysis" -> "Data-flow\nanalysis"
+  "Lock order graph" -> "Detection of\ncycles in lock\norder graph"
+  "Lock order graph" -> "Alias analysis" [style=dotted]
+}

@@ -1,0 +1,369 @@
+\myepigraph{Essentially, all models are wrong, but some are useful.}%
+         {George Box}
+\chapter{Design}
+
+\section{Goals}
+
+The following goals and limitations are targeted by the analysis:
+\begin{itemize*}
+\item Only safe and verifiable code should be analyzed. Unsafe code is largely used for interoperability with native libraries and thus its analysis wouldn't significantly contribute to the accuracy, if at all. The tool should be able to cope with unsafe code and skip over it if encountered.
+\item Dynamically generated code will not be analyzed.
+\item The whole program will be analyzed. Other works have investigated the use of program verification of software libraries. It would be an advantage if the chosen algorithm could later be extended to handle this scenario as well, but it is not a target of the prototype.
+\item The analysis should scale to applications as large as 200,000 lines of code.
+\item Locks managed by \texttt{Monitor.Enter}, \texttt{Monitor.TryEnter} and \texttt{Monitor.Exit} methods will be considered by the analysis. Other locking primitives are considered out of scope for the prototype.
+\item It is assumed that locks are balanced and that for each \texttt{Monitor.Enter} and \texttt{Monitor.TryEnter} call there is a corresponding \texttt{Monitor.Exit} call and that the exit calls are made in reverse order of the enter calls. 
+\end{itemize*}
+
+\section{Algorithm overview}
+
+The chosen algorithm is based on paper by \citet{Williams2005}. A high-level overview of the algorithm is given below and the specifics of applying the analysis to .NET code are discussed.
+
+Only two of the conditions necessary for deadlock to occur, namely \emph{lock order inversion} and \emph{no guard lock}, are verified. 
+
+First a lock order graph of the program is constructed using an interprocedural data-flow analysis. The analysis is flow-sensitive and context-sensitive. At each program point a symbolic state is computed that models the execution state along with an associated lock order graph and root set. The symbolic state at the end of a method is used as a method summary. The work list algorithm is used to compute a fixed point over all methods in the program. Thread entrypoints are identified in the call graph and method summaries of the entrypoints are merged into a single lock order graph that is output of the analysis.
+
+Context-sensitivity is provided by computing the intraprocedural analysis with a symbolic representation of method arguments, which are then substituted for the actual arguments at each call site.
+
+Each vertex of the lock order graph represents a set of objects that may be aliased. An edge represents nested locking of objects along some code path.
+
+The original analysis uses types as an approximation for the may-alias sets and we follow suit.
+
+Value flow through fields is not considered and can be computed using a separate analysis for a better precision.
+
+\section{Algorithm details}
+
+\subsection{Code representation}
+
+The analysis is executed directly on top of the intermediate language byte code instead of first translating the code to higher-level abstraction such as three-address code or abstract syntax tree\footnote{Description of different code representations can be found in \citet{Aho1986} and \citet{Muchnick1998}.}. While this makes the analysis faster it also makes it more complicated and introduces the following challenges:
+\begin{itemize*}
+\item In addition to modeling local variables the evaluation stack has to be modeled as well.
+\item The analysis as described by Williams doesn't have to account for separate \texttt{Monitor.Enter} and \texttt{Monitor.Exit} calls. Instead, it deals with the high-level \texttt{synchronized (object)} code blocks.
+\item The new \texttt{lock (object)} construct as implemented in C\# 4 causes the data-flow analysis to join on code paths where the stacks of currently acquired locks have different depth (eg. the code path where \texttt{if (acquired)} is taken and the one where it is not). Since our analysis is path-insensitive we cannot infer that one of the code paths is never taken. We account for it by joining the stacks only up to all elements that are common to both stacks. 
+\end{itemize*}
+
+The data-flow rules presented later in this section reference the instructions by their canonical name. Macro instructions, such as \texttt{Ldarg\_0}, are not included for bravity.
+
+\subsection{Symbolic state}
+
+The symbolic state (Figure ~\ref{fig:symbolicState}) is 7-tuple consisting of:
+\begin{itemize*}
+\item Current lock-order graph
+\item Root set of the lock-order graph
+\item Set of objects that have had \texttt{Monitor.Wait} called on them without an enclosing lock held in the current method
+\item Locks that are currently held in the order in which they were obtained, including re-entered locks
+\item Map of local variables to their symbolic object values
+\item Current evaluation stack in the method
+\item Map of method argument variables to their symbolic object values
+\end{itemize*}
+
+Since the state is composed of finite sets and finite graphs, it is possible to represent it as a lattice composed from individual power-set lattices. The join operation is defined accordingly in Listing ~\ref{fig:joinFunction} as the join of individual sets in the tuple. The initial symbolic state for each method is defined in ~\ref{fig:initialState}.
+
+\begin{figure}
+\begin{tabulary}{\textwidth}{ R C L }
+$T$ & $\in$ & Type \\
+$programPoint$ & $\in$ & ProgramPoint$_\bot$ \\
+$o$ = $\langle$ $programPoint$, $T$ $\rangle$ & $\in$ & SymbolicObject = ProgramPoint $\times$ Type \\
+$lockGraph$ & $\in$ & Graph = directed-graph-of SymbolicObjects \\
+$roots$ & $\in$ & Roots = set-of SymbolicObjects \\
+$wait$ & $\in$ & Wait = set-of SymbolicObjects \\
+$locals$ & $\in$ & Locals = LocalVariable $\rightarrow$ SymbolicObject \\
+$stack$ & $\in$ & Stack = stack-of (SymbolicObject $|$ null) \\
+$arguments$ & $\in$ & Arguments = Argument $\rightarrow$ SymbolicObject \\
+$s$ = $\langle$ $lockGraph$, $roots$, $wait$, $locks$, $locals$, $stack$, $arguments$ $\rangle$ & $\in$ & State = Graph $\times$ Roots $\times$ Wait $\times$ list-of SymbolicObjects $\times$ Locals $\times$ Stack $\times$ Arguments \\
+\end{tabulary}
+\caption{Type domains and symbolic state definition}
+\label{fig:symbolicState} 
+\end{figure}
+
+\begin{lstlisting}[language=CSharp,mathescape,caption=Join function for state,label=fig:joinFunction,float]
+$s_1 \sqcup s_2$ returns State $s'$
+  $s'$.g $\leftarrow$ $s_1$.g $\cup$ $s_2$.g
+  $s'$.roots $\leftarrow$ $s_1$.roots $\cup$ $s_2$.roots
+  $s'$.wait $\leftarrow$ $s_1$.wait $\cup$ $s_2$.wait
+  $s'$.locks $\leftarrow$ longest common sequence of $s_1$.locks and $s_2$.locks
+  $s'$.locals $\leftarrow$ $s_1$.locals $\sqcup$ $s_2$.locals
+  $s'$.stack $\leftarrow$ $s_1$.stack $\sqcup$ $s_2$.stack
+  $s'$.arguments $\leftarrow$ $s_1$.arguments $\sqcup$ $s_2$.arguments
+  
+$locals_1 \sqcup locals_2$ returns Locals $locals'$
+  $\forall$ $v \in ${$v' | v' \in locals_1 \vee v' \in locals_2$}
+    $locals' \leftarrow locals' \cup (locals_1[v] \sqcup locals_2[v])$
+
+$arguments_1 \sqcup arguments_2$ returns Arguments $arguments'$
+  $\forall$ $v \in ${$v' | v' \in arguments_1 \vee v' \in arguments_2$}
+    $arguments' \leftarrow arguments' \cup (arguments_1[v] \sqcup arguments_2[v])$
+
+$stack_1 \sqcup stack_2$ returns Stack $stack'$
+  /* all stacks have equivalent depth */
+  while (!stack_empty($stack_1$))
+    $v_1$ $\leftarrow$ $stack_1$.pop()
+    $v_2$ $\leftarrow$ $stack_2$.pop()
+    if ($v_1$ == null) $stack'$.push($v_2$)
+    else $stack'$.push($v_1 \sqcup v_2$)
+  $stack'$.reverse()
+
+$o_1 \sqcup o_2$ returns SymbolicObject $o'$
+  if ($o_1$ == $o_2$) $o' \leftarrow o_1$
+  else $o' \leftarrow \langle$ program_point(join_point($v$)), $T_1 \sqcup$ $T_2$ $\rangle$
+ 
+$T_1 \sqcup T_2$ returns lowest common superclass of $T_1$ and $T_2$
+
+$lockGraph_1 \sqcup lockGraph_2$ returns Graph $lockGraph'$
+  /* equivalent SymbolicObject values are collapsed */
+  vertices($lockGraph'$) $\leftarrow$ vertices($lockGraph_1$) $\cup$ vertices($lockGraph_2$)
+  /* equivalent SymbolicObject pairs are collapsed */
+  edges($lockGraph'$) $\leftarrow$ edges($lockGraph_1$) $\cup$ edges($lockGraph_2$)
+
+\end{lstlisting}
+
+\begin{lstlisting}[language=CSharp,mathescape,caption=Initial symbolic state for method,label=fig:initialState,float]
+initial_state($F$) returns State $s_0$
+    $s_0 \leftarrow$ empty State
+		$\forall$ $p \in F$.$arguments$
+      $o$ $\leftarrow$ $\langle$ entrypoint($F$), typeof($p$) $\rangle$
+      $s$.$arguments$[$p$] $\leftarrow$ $o$
+\end{lstlisting}
+
+\subsubsection{Symbolic object model}
+
+Each symbolic heap object represents the set of objects created at a given program point and their type.
+
+\subsubsection{Lock stack model}
+
+The analysis has to keep track of what locks are currently acquired in the method. This is done using the $locks$ stack. Each entry in the stack refers to a symbolic object that \texttt{Monitor.Enter} or \texttt{Monitor.TryEnter} method was called on. Re-entered locks are not recorded to the lock graph, but they are tracked in the $locks$ stack to allow for proper reference counting.
+
+We define \texttt{top\_lock($locks$)} as the last entered lock that wasn't already on the $locks$ stack.
+
+\subsubsection{Stack model}
+
+The .NET virtual machine can store different data types on the evaluation stack, such as 32-/64-bit/native integers, floating point numbers, managed pointers, transient pointers and object references.
+
+Integers and floating point numbers are largely irrelevant to our analysis. It is impossible to lock on value types, so an explicit boxing is necessary before these values are used. We do not model effect of such a boxing, but it is possible to enhance the analysis to account for it by handling the \texttt{box} instruction. We haven't observed any code that would use such construct although it is theoretically possible.
+
+Managed pointers are primarily used for passing parameters by indirect reference (the \texttt{ref} or \texttt{out} keywords in C\#). We do not model these stack values for simplicity. However, it was observed that at least one place in the Base Class Library calls \texttt{Monitor.Enter} on a method parameter that is passed by reference, and thus it is desirable to extend the analysis to support these stack values in the future.
+
+Transient pointers are used for referencing unmanaged memory and as such are of no interest to us.
+
+Finally, object references are modeled as symbolic object references on our stack.
+
+The $null$ meta-symbol is used for unknown stack entry, which could be either one of the unsupported data types listed above or object reference resulting from an unhandled instruction.
+
+\subsection{Flow function}
+
+The data-flow rules that compose the flow function are the following:
+\begin{itemize*}
+\item Basic value flow through stack, local variables and argument variables is described in Listing ~\ref{fig:rulesVariables}.
+\item Loading of values from fields, static fields and array elements is described in Listing ~\ref{fig:rulesLoad}.
+\item Method calls, creation of new objects and creation of new arrays are described in Listing ~\ref{fig:rulesCallAndNew}.
+\item For all unhandled instructions the evaluation stack is modified accordingly. First the correct number of elements is popped from the stack and then the correct number of $null$ meta-elements is pushed on the stack.
+\end{itemize*}
+
+The \texttt{Monitor} methods are intercepted when handling the \texttt{Call} instruction and handled by the helper methods in Listing ~\ref{fig:rulesHelpers}.
+
+Method calls are resolved using a pre-built call graph (eg. CHA call graph) and their summary state is merged into the caller call graph when handling the call instructions. The formal method parameters are mapped to the actual parameters, which increases precision. Return value from the summary state is currently not used, but it could serve to improve the precision as well. 
+
+\begin{lstlisting}[language=CSharp,mathescape,caption=Data-flow rules for local variable handling,label=fig:rulesVariables,float]
+Ldarg $Argument$
+    /* Load method argument onto stack. */
+    $o$ $\leftarrow$ $s$.$arguments$[$Argument$]
+    $s$.$stack$.push($o$);
+    
+Starg $Argument$
+    /* Pops the top value from the stack and stores it in argument slot for argument Argument. */
+    $o$ $\leftarrow$ $s$.$stack$.pop()
+    $s$.$arguments$[$Argument$] $\leftarrow$ $o$
+
+Ldloc $LocalVariable$
+    /* Loads the local variable onto stack. */ 
+    $o$ $\leftarrow$ $s$.$locals$[$LocalVariable$]
+    $s$.$stack$.push($o$)
+
+Stloc $LocalVariable$
+    /* Pops a value from the stack and stores it in local variable. */
+    $o$ $\leftarrow$ $s$.$stack$.pop()
+    $s$.$locals$[$LocalVariable$] $\leftarrow$ $o$
+
+Dup
+    /* Duplicates the value on the top of the stack. */
+    $o$ $\leftarrow$ $s$.$stack$.pop()
+    $s$.$stack$.push($o$)
+    $s$.$stack$.push($o$)    
+
+Isinst $T$
+    /* Tests if an object reference is an instance of T, returning either a null reference or an instance of that class or interface. */
+Castclass $T$
+    /* Casts an object to a new object of type T. */
+    $o$ $\leftarrow$ $s$.$stack$.pop()
+    if ($o$ == null)
+      $s$.$stack$.push($o$)
+    else
+      $s$.$stack$.push($\langle$ $o$.$programPoint$, $T$ $\rangle$)
+\end{lstlisting} 
+
+\begin{lstlisting}[language=CSharp,mathescape,caption=Data-flow rules for other variable loading,label=fig:rulesLoad,float]
+Ldfld $F$
+    /* Pushes the value of a field F in a specified object o1 onto the stack. */
+  	$o_1$ $\leftarrow$ $s$.$stack$.pop()
+		$o$ $\leftarrow$ $\langle$ program_point($stmt$), declared_type($T$) $\rangle$
+    $s$.$stack$.push($o$)
+
+Ldsfld $F$
+    /* Push the value of field F on the stack. */
+		$o$ $\leftarrow$ $\langle$ program_point($stmt$), declared_type($T$) $\rangle$
+    $s$.$stack$.push($o$)
+
+Ldelem_Ref $T$
+    /* Loads the element with an object reference at index onto the top of the stack as type T. */
+    $index$ $\leftarrow$ $s$.$stack$.pop()
+  	$o_1$ $\leftarrow$ $s$.$stack$.pop()
+		$o$ $\leftarrow$ $\langle$ program_point($stmt$), element_type($o_1$) $\rangle$
+    $s$.$stack$.push($o$)
+\end{lstlisting}
+
+\begin{lstlisting}[language=CSharp,mathescape,caption=Data-flow rules for calls and object creation,label=fig:rulesCallAndNew,float]
+Newobj $F$
+    /* Allocates an uninitialized object or value type and calls the constructor method. */
+Calli $F$
+    /* Calls the method pointed to with arguments described by the calling convention. */
+Call $F$
+    /* Call the method F */
+Callvirt $F$
+    /* Calls a specific method associated with o. */
+
+    /* intercept Monitor calls */
+    if (opcode == Call)
+      if ($F$ == Monitor.Enter || $F$ == Monitor.TryEnter)
+        enter_lock($s$, first_parameter($s$, $F$))
+      else if ($F$ == Monitor.Exit)
+        exit_lock($s$, first_parameter($s$, $F$))
+      else if ($F$ == Monitor.Wait)
+        wait_on_lock($s$, first_parameter($s$, $F$))
+
+    /* pop indirect address for calli */
+    if (opcode == Calli)
+      $s$.$stack$.pop();
+        
+		/* pop method arguments */
+		$\forall$ $p \in F$.$arguments$
+			$s$.$stack$.pop();
+		if (!is_static($F$))
+			$o$ $\leftarrow$ $s$.$stack$.pop();
+		else
+			$o$ $\leftarrow$ null;
+
+    $\forall$ $F_v \in$ versions of $F$ in subclasses of $o$
+      $s_m$ $\leftarrow$ method_summary($F_v$)
+      $s_m$ $\leftarrow$ rename_from_callee_to_caller_context($s_m$, $state$, $F_v$) 
+      /* connect the two graphs, including roots */
+      if (empty($s$.$locks$))
+        $s$.$roots$ $\leftarrow$ $s$.$roots$ $\cup$ $s_m$.$roots$
+        $s$.$wait$ $\leftarrow$ $s$.$wait$ $\cup$ $s_m$.$wait$
+      else
+        $\forall$ $root \in s_m$.$roots$
+          $s$.$lockGraph$ $\leftarrow$ $s$.$lockGraph$ $\cup$ edge(top_lock($s$.$locks$) $\rightarrow$ $root$)
+        $\forall$ $w \in s_m$.$wait$
+          $s$.$lockGraph$ $\leftarrow$ $s$.$lockGraph$ $\cup$ $w$ $\cup$ edge(top_lock($s$.$locks$) $\rightarrow$ $w$)
+				
+		/* push return value */
+		if (return_type($F$) != void)
+    		$o$ $\leftarrow$ $\langle$ program_point($stmt$), return_type($F$) $\rangle$
+				$s$.$stack$.push($o$);
+
+Newarr $T$
+    /* Creates a new array with elements of type T. */
+    $s$.$stack$.pop()
+		$o$ $\leftarrow$ $\langle$ program_point($stmt$), $T$ $\rangle$
+    $s$.$stack$.push($o$)
+\end{lstlisting}
+
+\begin{lstlisting}[language=CSharp,mathescape,caption=Helper methods,label=fig:rulesHelpers,float]
+enter_lock($s$, $o$)
+    if ($o \notin s$.$locks$)
+      if (empty($s$.$locks$))
+        $s$.$lockGraph$ $\leftarrow$ $s$.$lockGraph$ $\cup$ $o$
+        $s$.$roots$ $\leftarrow$ $s$.$roots$ $\cup$ $o$
+      else
+        $s$.$lockGraph$ $\leftarrow$ $s$.$lockGraph$ $\cup$ $o$ $\cup$ edge(top_lock($s$.$locks$) $\rightarrow$ $o$)
+    $s$.$locks$.push($o$)
+
+exit_lock($s$, $o$)
+    /* locks are balanced */
+    $s$.$locks$.pop()
+
+wait_on_lock($s$, $o$)
+    if (empty($s$.$locks$))
+      $s$.$wait$ $\leftarrow$ $s$.$wait$ $\cup$ $o$
+    else
+      /* wait releases and then reacquires, which can introduce new lock ordering */
+      $s$.$lockGraph$ $\leftarrow$ $s$.$lockGraph$ $\cup$ $o$ $\cup$ edge(top_lock($s$.$locks$) $\rightarrow$ $o$)
+      
+rename_from_callee_to_caller_context($s_{caller}$, $s_{callee}$, $F_v$) returns State $s'$
+    $s' \leftarrow s_{caller}$
+    $stack \leftarrow s_{caller}$.$stack$
+    
+    /* create a map for formal arguments to their actual values */ 
+    $\forall a \in$ reverse($F_v$.$arguments$)
+      $map_{\langle entrypoint(F_v), typeof(a) \rangle} \leftarrow stack$.pop()
+      
+    $\forall o \in s_{callee}$.$lockGraph$
+      if ($\exists map_o$) $o' \leftarrow map_o$
+      else $o' \leftarrow \langle pp_\bot, o$.T$ \rangle$
+      if ($o' \in s_{caller}$.$locks$) $s'$.$lockGraph$, $s'$.$roots$ $\leftarrow$ splice_out_vertex($s'$.$lockGraph$, $s'$.$roots$, $o$)
+      else $s'$.$lockGraph$, $s'$.$roots$ $\leftarrow$ replace_vertex($s'$.$lockGraph$, $s'$.$roots$, $o$, $o'$)
+    $s'$.$wait \leftarrow \emptyset$        
+    $\forall o \in s_{callee}$.$wait$
+      if ($\exists map_o$) $s'$.$wait \leftarrow s'$.$wait \cup map_o$
+      else $s'$.$wait \leftarrow \langle pp_\bot, o$.T$ \rangle$
+
+splice_out_vertex($g$, $roots$, $o$) returns Graph $g'$, Roots $roots'$
+    $g' \leftarrow g \setminus o$
+    $\forall$ $g$.edges($src \rightarrow o$) s.t. $o \neq src$
+      $\forall$ $g$.edges($o \rightarrow dst$) s.t. $o \neq dst$
+        $g' \leftarrow g'$ $\cup$ edge($src \rightarrow dst$)
+    $roots' \leftarrow roots \setminus o$
+    if ($o \in roots$) 
+      $\forall$ $g$.edges($o \rightarrow dst$) s.t. $o \neq dst$
+        $roots' \leftarrow roots' \cup dst$
+
+replace_vertex($g$, $roots$, $o_{old}$, $o_{new}$) returns Graph $g'$, Roots $roots'$
+    $g' \leftarrow (g \setminus o_{old}) \cup o_{new}$
+    $\forall$ edges($src \rightarrow o_{old}$) $\in g: g' \leftarrow g'$ $\cup$ edge($src \rightarrow o_{new}$)
+    $\forall$ edges($o_{old} \rightarrow dst$) $\in g: g' \leftarrow g'$ $\cup$ edge($o_{new} \rightarrow dst$)
+    if ($o_{old} \in roots$) $roots' \leftarrow (roots \setminus o_{old}) \cup o_{new}$
+    else $roots' \leftarrow roots$
+\end{lstlisting}
+
+\subsection{Identifying thread entrypoints}
+
+In order to compose the resulting lock order graph and root set for the whole program we merge the individual lock order graphs and root sets of thread entrypoints. We consider the following methods as thread entrypoints:
+\begin{itemize*}
+\item The main assembly entrypoint (eg. the \texttt{Main} method).
+\item Any method that was assigned to a delegate of one of the following types:
+\begin{itemize*}
+\item \texttt{System.Threading.ThreadStart}
+\item \texttt{System.Threading.ParameterizedThreadStart}
+\item \texttt{System.Threading.WaitCallback}
+\item \texttt{System.Threading.TimerCallback}
+\end{itemize*}
+\end{itemize*}
+
+\subsection{Post-processing}
+
+The original analysis as specified by \citet{Williams2005} specifies an additional post-processing step (Listing ~\ref{fig:postProcess}) of adding edges between all possible subclasses of locked objects. This is necessary to keep the analysis sound due to the simple may-alias approximation. We omit implementation of this step because it introduces additional false positives. Omission of this additional step was suggested by Williams as one of the unsound heuristics that reduces the number of false positives significantly:
+
+\begin{quote}
+``This heuristic has some intuitive merit because it restricts attention to code that operates on a specific type, rather than a more general type. For example, it considers the effects of all synchronized methods of a given class, but it eliminates the assumption that all objects could be aliased with a field of type Object that may be locked elsewhere."
+\end{quote}
+
+\begin{lstlisting}[language=CSharp,mathescape,caption=Post processing,label=fig:postProcess]
+post_process($s_1,...,s_n$) returns Graph $g$
+    $g \leftarrow$ empty Graph
+    $\forall i \in [1,n]:$
+      $\forall$ edges($o_1 \rightarrow o_2$) $\in s_i.lockGraph$:
+        /* add edges between all possible subclasses of locked objects. */
+        /* all heap objects now have bottom program point $pp_\bot$. */
+        $\forall$ subclasses $T_1$ of $o_1$.$T$, $\forall$ subclasses $T_2$ of $o_2$.$T$:
+          $o_{T_1} \leftarrow \langle pp_{\bot}, T_1 \rangle$
+          $o_{T_2} \leftarrow \langle pp_{\bot}, T_2 \rangle$
+          $g \leftarrow g \cup o_{T_1} \cup o_{T_2} \cup$ edge($o_{T_1} \rightarrow o_{T_2}$)
+\end{lstlisting}

@@ -1,0 +1,141 @@
+\myepigraph{When two trains approach each other at a crossing, both shall come to a full stop and neither shall start up again until the other has gone.}%
+         {Kansas State Law, early 20th century}
+\chapter{Background}
+
+In this chapter we will describe what .NET Framework is, which locking mechanisms are available in the framework and how usage of these locking mechanisms can lead to deadlock. We will also introduce lock order graph structure that is used by many of deadlock detection tools, which are described later in Chapter 4.
+
+\section{.NET Framework}
+
+The .NET Framework is a general-purpose software development platform similar to the Java Development Kit. It includes a rich class library (Base Class Library or BCL) and a virtual machine model that is independent of the underlying platform.
+
+The platform independent code is stored using an intermediate language (also referred to as Common Intermediate Language, CIL, IL or bytecode). The data are passed around between individual instructions using a stack. The instructions are aware of the object-oriented programming model and are more high-level than the native processor instructions. For example, there are instructions to allocate a new object, load a field from object or to call a virtual method.
+
+Information about the program structure is largely preserved in metadata of the executable files. This includes class structure, typing information and method signatures. The code also remains separated into individual methods.
+
+The virtual machine is intended to be type-safe and verifies the code before execution. However, the .NET Framework also supports a notion of unsafe code that operates on pointers. The unsafe code is most commonly used for interoperability with native platform libraries and its use makes the program unverifiable. The virtual machine may disallow execution of unsafe code based on the security context the application is run under.
+
+Unlike Java, the .NET intermediate language has notion of generics, function pointers (called \emph{delegates}) and passing of parameters by reference.
+
+A more detailed overview of the .NET framework is given in ECMA-335 standard \citep{Ecma335}.
+
+\section{Locks in .NET Framework}
+
+In .NET Framework, each object has an associated lock. This lock can be acquired using the \texttt{Monitor.Enter} or \texttt{Monitor.TryEnter} method and released using the \texttt{Monitor.Exit} method. The C\# language also offers a simplified \texttt{lock (object)} construct that is translated by the compiler to appropriate \texttt{Monitor.Enter} and \texttt{Monitor.Exit} calls with proper exception handling (Listing ~\ref{fig:lock20} and ~\ref{fig:lock40}). While not enforced by the runtime it is an accepted practice, supported by the language syntax, that locks are released in reverse order of their acquisition.
+
+A lock that is held by one thread cannot be acquired in another thread until the first thread releases it. Thread blocks if an attempt is made to acquire lock that is held by another thread and it is blocked until it successfully acquires the lock\footnote{The thread may not be completely blocked. Due to compatibility with COM, a thread that uses single thread apartment model has to process incoming messages while waiting for the lock to be acquired. This is implemented internally using the \texttt{SynchronizationContext} abstraction and the \texttt{CoWaitForMultipleObjects} Win32 API function. It may cause unexpected changes to the lock hierarchy for implementations of COM objects and for paint messages in UI frameworks such as WPF and System.Windows.Forms.}. Exception to this behavior is the \texttt{Monitor.TryEnter} method which allows execution to continue even if the lock wasn't acquired provided that a specified timeout was reached while waiting for the lock to be released by another thread.
+
+Locks are held per-thread and they are re-entrant. Acquiring a lock that is already held by the thread doesn't block the execution and the lock is released when the outermost \texttt{Monitor.Exit} for the given lock is called.
+
+Methods \texttt{Monitor.Wait}, \texttt{Monitor.Pulse} and \texttt{Monitor.PulseAll} are available to facilitate signaling. All of these methods operate on locks that are already held.
+
+When a thread calls \texttt{Monitor.Wait}, it releases the lock on the object and enters the object's waiting queue. The next thread in the object's ready queue (if there is one) acquires the lock and has exclusive rights to the object. All threads that call \texttt{Monitor.Wait} remain in the waiting queue until they receive a signal from \texttt{Monitor.Pulse} or \texttt{Monitor.PulseAll}. Once a thread is removed from an object's waiting queue, the \texttt{Monitor.Wait} method attempts to reacquire the lock for the object it was invoked on. The method returns only after the lock is reacquired.
+
+The .NET Framework also offers other locking primitives, such as \texttt{Mutex}, \texttt{AutoResetEvent}, \texttt{ManualResetEvent} and \texttt{Semaphore}, that offer different capabilities than the regular locks. These locking primitives are implemented using operating system kernel objects and thus they can be used for inter-process synchronization. Semantics of these locking primitives also differ from regular locks in terms of reentrancy and thread ownership.
+
+For a more detailed overview of threading and locking mechanisms in .NET Framework please refer to the Threading in C\# book \citep{Albahari2006}.
+
+\begin{lstlisting}[language=CSharp,caption=lock(o) construct in C\# 2.0,label=fig:lock20]
+Monitor.Enter(o);
+try
+{
+   ...
+}
+finally
+{
+   Monitor.Exit(o);
+}
+\end{lstlisting}
+
+\begin{lstlisting}[language=CSharp,caption=lock(o) construct in C\# 4.0,label=fig:lock40]
+bool acquired = false;
+try
+{
+   Monitor.Enter(o, ref acquired);
+   ...
+}
+finally
+{
+   if (acquired)
+      Monitor.Exit(o);
+}
+\end{lstlisting}
+
+\section{Deadlock}
+
+For a deadlock to occur it is necessary to fulfill a set of conditions known as \emph{Coffman conditions} \citep{Coffman1971}. The necessary conditions are the following:
+\begin{itemize*}
+\item \emph{mutual exclusion} - Tasks claim exclusive control of a resource they require.
+\item \emph{hold and wait} - Tasks hold resources that already have control of while waiting to acquire additional resources.
+\item \emph{no preemption} - Resources are not forcibly removed from under the task that currently controls them. The task is responsible for releasing the resource it acquired.
+\item \emph{circular wait} - Two or more tasks form a circular chain where each task waits for a resource already owned by a different task in the set.
+\end{itemize*}
+
+In .NET, the tasks can be seen as threads and the resources as the implicit locks associated with every object. It is possible to hit all four conditions in .NET and thus deadlock can occur. 
+
+The circular wait condition itself is very broadly defined and can further be dissected into subconditions that have to be met for the deadlock to occur:
+\begin{itemize*}
+\item \emph{Lock order inversion} - Locks on two or more objects are acquired in different code paths in different order (Listing ~\ref{fig:lockOrderInversion2} and ~\ref{fig:lockOrderInversion3}).
+\item \emph{Parallel execution} - The lock order inversion has to happen in two separate threads that may run in parallel.
+\item \emph{No guard lock} - If each lock order inversion is guarded by an additional lock, also known as \emph{guard lock}, then no execution path can actually reach the locks in inverted order and thus the inversion cannot cause a deadlock (Listing ~\ref{fig:lockOrderInversionGuard}).
+\end{itemize*}
+
+\begin{lstlisting}[language=CSharp,caption=Lock order inversion with 2 resources,label=fig:lockOrderInversion2]
+/* Thread 1: */ lock (a) { lock (b) { ... } }
+/* Thread 2: */ lock (b) { lock (a) { ... } }
+\end{lstlisting}
+
+\begin{lstlisting}[language=CSharp,caption=Lock order inversion with 3 resources,label=fig:lockOrderInversion3]
+/* Thread 1: */ lock (a) { lock (b) { ... } }
+/* Thread 2: */ lock (b) { lock (c) { ... } }
+/* Thread 3: */ lock (c) { lock (d) { ... } }
+\end{lstlisting}
+
+\begin{lstlisting}[language=CSharp,caption=Lock order inversion protected by guard lock,label=fig:lockOrderInversionGuard]
+/* Thread 1: */ lock (c) { lock (a) { lock (b) { ... } } }
+/* Thread 2: */ lock (c) { lock (b) { lock (a) { ... } } }
+\end{lstlisting}
+
+\section{Lock order graph}
+
+A graph representation of the lock order hierarchy is called \emph{lock order graph}. Each vertex in the graph is a resource that program locks on. Each edge represents a lock hierarchy, ie. acquisition of resource $r_1$ while already holding resource $r_2$ is represented by an edge $r_1 \rightarrow r_2$.
+
+\begin{definition}
+A \emph{lock order graph} is directed graph $\langle N, E \rangle$, where $N$ is the set of vertices corresponding to abstract objects that are used as locks, and $E$ is the set of directed edges that reflect the order in which each thread acquires the locks.
+\end{definition}
+
+\begin{definition}
+Additionally we define a set \emph{roots} that specifies vertices of the lock order graph that are top-level locks in any thread.
+\end{definition}
+
+\begin{figure}[h]
+\begin{center}
+\digraph[scale=0.65]{LockOrderInversion2}{
+a -> b;
+b -> a;
+}
+\caption{Lock order inversion with 2 resources}
+\end{center}
+\end{figure}
+
+\begin{figure}[h]
+\begin{center}
+\digraph[scale=0.65]{LockOrderInversion3}{
+a -> b;
+b -> c;
+c -> a;
+}
+\caption{Lock order inversion with 3 resources}
+\end{center}
+\end{figure}
+
+\begin{figure}[h]
+\begin{center}
+\digraph[scale=0.65]{LockOrderInversionGuard}{
+c -> a;
+a -> b;
+b -> a;
+c -> b;
+}
+\caption{Lock order inversion protected by guard lock}
+\end{center}
+\end{figure}

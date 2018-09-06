@@ -1,0 +1,68 @@
+\myepigraph{Map out your future -- but do it in pencil.}{Jon Bon Jovi}
+\chapter{Future work}
+
+\section{Improving precision}
+
+\subsection{Alias analysis}
+
+As we have observed, the greatest source of false positives is the lack of may-alias analysis. Adding an alias analysis would resolve two important problems -- precision of call graph and precision of symbolic objects representing fields.
+
+Testing has shown that the very conservative over-approximation of the call graph makes the analysis not only imprecise, but also slow. The largest source of this imprecision are function pointers. As shown by \citet{Milanova2002} the FA alias analysis should be precise enough for the resolution of function pointers. 
+
+The same alias analysis can be reused to represent symbolic objects using may-alias sets properly. It was shown by \citet{Deshmukh2009} how the basic approach we use can be extended to utilize the results of alias analysis. 
+
+\subsection{Exception flow}
+
+The tool we have implemented currently doesn't consider the exception handlers in the control-flow graph and thus it cannot find and lock order violation caused in the exceptional code paths.
+
+There are two possible ways how to resolve this problem: 1) Extend the data-flow analysis solver to consider the exception handler blocks, 2) Extend the control-flow graph builder to add edges to the exception handlers.
+
+The second approach may be easier to implement since \citet{ILSpy} have already built an implementation of the necessary code while this thesis was being written. 
+
+\subsection{Evaluation stack}
+
+As we have already noted in Chapter 5, the chosen model of evaluation stack is oversimplified and doesn't accurately track the indirect addresses pushed onto the stack that are later used for passing parameters by reference.
+
+We have built the tool in a way that allows the evaluation stack model to be extended to account for other data types than the $null$ meta-symbol and references to symbolic objects.
+
+\subsection{.override keyword}
+
+Our implementation of the Class Hierarchy Graph doesn't account for the \texttt{.override} keyword which allows overriding method in a subclass using a different name.
+
+This is trivial to fix, but it wasn't considered a priority since the C\# compiler can't produce intermediate code with this keyword.
+
+\section{Extending scope}
+
+\subsection{Lock order violation with three or more objects}
+
+The lock analyzer tool can be extended to report simple cycles with more than two vertices, as stated in Chapter 5.
+
+\subsection{Unbalanced Monitor.Enter and Monitor.Exit calls}
+
+It is possible to extend the analysis to include support for unbalanced number of \texttt{Monitor.Enter} and \texttt{Monitor.Exit} calls within a single method. This could be beneficial for programs that implement custom lock types that internally use Monitor calls. % figure?
+
+The lock state computed for each method contains the information about which locks are still held when the function returns. These locks can be aggregated into the caller's lock state when merging the callee and caller lock states. It is however possible that different targets of the call site would contribute different held locks and it is non-trivial to solve this problem.
+
+Similarly, it would be necessary to record which locks \texttt{Monitor.Exit} was called on that were not currently held by the method. This would have to be recorded in a set in the symbolic state. When merging callee's symbolic state wiht the caller's, the locks would have to be removed from the lock state of the caller, which may once again be problematic for non-trivial cases.
+
+\subsection{Handling of Synchronization attribute}
+
+The \texttt{Synchronization} attribute together with the \texttt{ContextBoundObject} type provides a means for run-time interception of method calls that transparently adds synchronization around each method call. The underlying synchronization is performed using the \texttt{Monitor.Enter} and \texttt{Monitor.Exit} calls.
+
+It it possible to extend the analysis to look for the \texttt{Synchronization} attribute and account for it when computing method summary by applying the hidden \texttt{Monitor.Enter} and \texttt{Monitor.Exit} calls to the lock state. 
+
+%\subsection{Handling additional synchronization primitives}
+
+%The analysis can be extended to handle additional synchronization primitives,such as those represented by WaitHandle.
+
+% Monitor.Wait
+
+\section{Presentation of results}
+
+\subsection{Better counter-examples}
+
+It would be beneficial to provide better counter-examples for the violations found by the LovePrototype tool. One possible improvement would be the inclusion of a full method call chain leading to the potential deadlock. It is possible to track this information when building the lock order graph, but it causes rapidly higher memory usage. A better approach would be to use the call graph and recompute a possible code path only when a lock order violation is found.
+
+\subsection{Report file names and line numbers}
+
+We currently provide method name and IL code offset in the lock order violation report. The Mono.Cecil library allows extraction of source code file name and line numbers if the accompanying debug symbols are present. It would be beneficial to use this information in the reports.

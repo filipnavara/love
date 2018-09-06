@@ -1,0 +1,155 @@
+\myepigraph{Program testing can be used to show the presence of bugs, but never to show their absence!}%
+         {Edsger Dijkstra}
+\chapter{Testing and experimental results}
+
+Our benchmark consists of 12 simple test cases that cover common C\# lock patterns and one larger commercial application. The analysis was run on 1.3 GHz Intel Pentium SU4100 ULV processor with 5 GB of RAM.
+
+\section{Test cases}
+
+We have developed 12 simple test cases that represent the common code patterns and serve as verification for the tool:
+\begin{itemize*}
+\item Locking on static field (\textit{LockOnStaticField.cs})
+\item Locking on instance field (\textit{LockOnField.cs})
+\item Locking on \texttt{this} reference (\textit{LockOnThis.cs})
+\item Locking on \texttt{typeof(Type)} (\textit{LockOnType.cs})  
+\item Nested locks with no guard lock (\textit{NoGuardLock.cs})
+\item Nested locks with guard lock (\textit{GuardLock.cs})
+\item Thread creation using \texttt{ThreadPool.QueueUserWorkItem} (\textit{ThreadPool.cs})
+\item Thread creation using \texttt{new Thread(ThreadStart f)} (\textit{Basic2.cs}) 
+\item Thread creation using \texttt{new Thread(ParametrizedThreadStart f)} ( \textit{ParametrizedThreadStart.cs})
+\item Nested locks across several functions (\textit{CallStack.cs})
+\item Nested locks across several functions refernced by delegates (\textit{Delegate.cs})
+\item Reentrancy of locks (\textit{DoubleEnter.cs}) 
+\end{itemize*}
+All these test cases were compiled with C\# 4.0 compiler and targeted for the .NET Framework 4.0.30319 runtime.
+
+Additionally we use eM Client 1.0.2039 as a test case representing a larger commercial application. The code base consists of 44,928 lines of code and heavily uses multi-threading for asynchronous processing. We deliberately use an older version of the application because it was later modified to be analyzable by our unpublished CSLint fork. Additionally, most of the deadlocks present in the older version were already analyzed and are well understood, which significantly helps with the interpretation of the results.
+
+Since we do a whole program analysis and the Base Class Library is referenced by every application, it is also implicitly included in each analysis conducted with the tool (unless the \texttt{--ignoresystemnamespace} option is used).
+
+\section{Results}
+
+We ran the tool with default options on the 12 simple test cases first. Analyzing each test case has taken roughly 7 seconds. The results are summarized in Figure ~\ref{fig:results01}. All expected deadlock causing patterns were identified in the test cases. Additionally 7 or 9 false positives, depending on a specific test case, are generated for the Base Class Library code. These false positives are results of impossible aliasing relationship of objects with type \texttt{System.Object}. Finally, one suspicious deadlock causing pattern (Figure ~\ref{fig:suspiciousLockingPattern}) is identified in the Base Class Library, that appears for all the test cases. The affected code is a part of .NET Remoting stack (\texttt{System.Runtime.Remoting} namespace) which is not publically exposed and thus not documented. We were unable to confirm or deny if the specific pattern can lead to a deadlock in practice or not.
+
+% Code size, Graph size, Results
+\begin{figure}[H]
+\begin{center}
+\begin{tabulary}{\textwidth}{ | l | r | r | r | }
+\hline
+Test case & \multicolumn{3}{c|}{Deadlock causing patterns} \\
+\cline{2-4}
+          & Reported & Confirmed & Expected\\          
+\hline
+Basic2 & 11 & 1 & 1 \\
+CallStack & 11 & 1 & 1 \\
+Delegate & 11 & 1 & 1 \\
+DoubleEnter & 11 & 1 & 1 \\
+GuardLock & 10 & 0 & 0 \\
+LockOnField & 9 & 1 & 1 \\
+LockOnStaticField & 11 & 1 & 1 \\
+LockOnThis & 9 & 1 & 1 \\
+LockOnType & 9 & 1 & 1 \\
+NoGuardLock & 11 & 1 & 1 \\
+ParametrizedThreadStart & 11 & 1 & 1 \\
+ThreadPool & 9 & 1 & 1 \\
+\hline
+\end{tabulary}
+\caption{Results for simple test cases}
+\label{fig:results01}
+\end{center}
+\end{figure}
+
+Next, we ran the tool with the \texttt{--ignoresystemnamespace} parameter on the same 12 simple test cases and also on eM Client. Results are summarized in Figure ~\ref{fig:results02}. For the 12 simple test cases the analysis runs in about 4 seconds and all the reports correspond to the expected deadlocks.
+
+Analysis of eM Client took 2 minutes 40 seconds. Among the six reported deadlock patterns, only one corresponds to a real deadlock.
+
+This deadlock pattern actually covers several possible deadlocks, which are incorrectly smeared into a single one due to overly pessimistic assumption about \texttt{System.Object} aliasing. We keep at most one edge between any two symbolic objects in the lock order graph and store the callee and caller method names along with the edge. This results in a report that isn't very intuitive for further analysis since the provided context is insufficient for throughout manual analysis.
+
+Three other reports were caused by overly pessimistic assumption about the delegate resolution. The rest of the reports were result of a pessimistic assumptions about variable aliasing.
+
+% Code size, Graph size, Results
+\begin{figure}[H]
+\begin{center}
+\begin{tabulary}{\textwidth}{ | l | r | r | r | }
+\hline
+Test case & \multicolumn{3}{c|}{Deadlock causing patterns} \\
+\cline{2-4}
+          & Reported & Confirmed & Expected\\          
+\hline
+Basic2 & 1 & 1 & 1 \\
+CallStack & 1 & 1 & 1 \\
+Delegate & 1 & 1 & 1 \\
+DoubleEnter & 1 & 1 & 1 \\
+GuardLock & 0 & 0 & 0 \\
+LockOnField & 1 & 1 & 1 \\
+LockOnStaticField & 1 & 1 & 1 \\
+LockOnThis & 1 & 1 & 1 \\
+LockOnType & 1 & 1 & 1 \\
+NoGuardLock & 1 & 1 & 1 \\
+ParametrizedThreadStart & 1 & 1 & 1 \\
+ThreadPool & 1 & 1 & 1 \\
+eM Client & 40 & 4 & - \\
+\hline
+\end{tabulary}
+\caption{Results for test cases when analyzed with the \texttt{--ignoresystemnamespace} parameter}
+\label{fig:results02}
+\end{center}
+\end{figure}
+
+Finally, we ran the tool with \texttt{--ignoresystemnamespace} and \texttt{--noaliasing} parameters. The results are summarized in Figure ~\ref{fig:results03}. For the 12 simple test cases the results were identical to previous run.
+
+The analysis of eM Client took 2 minutes and 56 seconds and 40 reports were generated. Four of these reports were verified to be valid deadlock patterns that can actually lead to deadlock at run-time. The rest of the reports were false positives. Majority of the false positives were results of an overly pessimistic assumption about delegate resolution.
+
+\begin{figure}[H]
+\begin{center}
+\begin{tabulary}{\textwidth}{ | l | r | r | r | }
+\hline
+Test case & \multicolumn{3}{c|}{Deadlock causing patterns} \\
+\cline{2-4}
+          & Reported & Confirmed & Expected\\          
+\hline
+Basic2 & 1 & 1 & 1 \\
+CallStack & 1 & 1 & 1 \\
+Delegate & 1 & 1 & 1 \\
+DoubleEnter & 1 & 1 & 1 \\
+GuardLock & 0 & 0 & 0 \\
+LockOnField & 1 & 1 & 1 \\
+LockOnStaticField & 1 & 1 & 1 \\
+LockOnThis & 1 & 1 & 1 \\
+LockOnType & 1 & 1 & 1 \\
+NoGuardLock & 1 & 1 & 1 \\
+ParametrizedThreadStart & 1 & 1 & 1 \\
+ThreadPool & 1 & 1 & 1 \\
+eM Client & 6 & 1 & - \\
+\hline
+\end{tabulary}
+\caption{Results for test cases when analyzed with \texttt{--ignoresystemnamespace} and \texttt{--noalias} parameters}
+\label{fig:results03}
+\end{center}
+\end{figure}
+
+\begin{figure}
+\begin{center}
+\digraph[scale=0.45]{BCLLock}{
+	rankdir="TB";
+	subgraph cluster_G1
+	{
+		style=rounded;
+		color=red;
+		L1A [label = "lock(this) [Lease]", color=red];
+		L2B [label = "lock(this) [Lease]",color=red];
+	}
+	subgraph cluster_G2
+	{
+		style=rounded;
+		color=blue;
+		L1B [label = "lock(this) [ServerIdentity]", color=blue];
+		L2A [label = "lock(this.identity) [ServerIdentity]", color=blue];
+	}
+	"LeaseManager.LeaseTimeAnalyzer" -> "Lease.SponsorTimeout" -> "Lease.ProcessNextSponsor" -> "Lease.Cancel" -> L1A -> "RemotingServices.Disconnect" -> "IdentityHolder.RemoveIdentity" -> "ServerIdentity.ResetHandle" -> L1B;
+	"..." -> "ServerIdentity.GetServerObjectChain" -> "Context.CreateServerObjectChain" -> "LeaseLifeTimeServiceProperty.GetObjectSink" -> L2A -> "Lease.Renew" -> "Lease.RenewInternal" -> L2B;
+}
+\caption{Suspicious locking pattern in Base Class Library}
+\label{fig:suspiciousLockingPattern}
+\end{center}
+\end{figure}

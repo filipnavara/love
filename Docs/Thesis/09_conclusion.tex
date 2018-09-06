@@ -1,0 +1,13 @@
+\chapter{Conclusion}
+
+Examining programs using static code analysis requires choosing the correct static code analysis techniques and selecting a correct representation of the information we want to gather. In our case we used an interprocedural data-flow analysis on CHA call graph to compute the lock order graph. Then we extracted possible deadlock causing patterns from the lock order graph.
+
+The current research in static program analysis of object-oriented languages is focused primarily on Java. Application of the existing principles on C\# and other .NET Framework languages was thus far limited to only handful of tools that mostly originated as a part of work in Microsoft Research.
+
+We have developed a framework that simplifies the implementation of static program analyses on .NET code and that can serve as a basis for other research work in the area of static analysis of .NET programs.
+
+We have further demonstrated the use of the framework for finding deadlocks in .NET programs. To our best knowledge this is the first documented implementation of interprocedural data-flow analysis of .NET code. While .NET presents more challenges than Java, such as function pointers, most off-the-shelf analyses performed on Java code could be adapted to work on .NET as well.
+
+The experimental results obtained from the deadlock analysis tool showed that even analyzing larger programs can be done in very reasonable time. It was also shown that the tool can find actual deadlocks in a production code. The number of false positives was relatively high and we described several approaches to attack the problem that are worth pursuing in future, such as implementation of alias analysis.
+
+While we were working on our tool and framework, another team of developers started development of the ILSpy tool \citep{ILSpy}, a decompiler and analyzer for .NET assemblies. This has resulted in the development of another static analysis library, which also works on top of the Mono.Cecil library. While the focus of this library is slightly different from ours there is some common overlap. Significant work was devoted to implementation of intermediate code representations that operate at higher level of abstraction than Common Intermediate Language. This includes abstractions similar to three-address code, SSA and abstract syntax trees. This work can play significant role when designing and implementing further static analyses of .NET code.

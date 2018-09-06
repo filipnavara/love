@@ -1,0 +1,155 @@
+\documentclass[11pt,oneside,a4paper]{book}
+% \usepackage[a5paper]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[czech, english]{babel}
+\usepackage{listings}
+\usepackage{algorithmic}
+\usepackage{todonotes}
+\usepackage{graphicx}
+\usepackage{natbib}
+\usepackage{amsthm}
+\usepackage{subfig}
+\usepackage{rotating}
+\usepackage{epigraph}
+\usepackage{framed}
+\usepackage{url}
+\usepackage{tabulary}
+\usepackage{float}
+\usepackage{mdwlist}
+\usepackage{multirow}
+\usepackage[helvetica]{quotchap}
+% \usepackage{times}
+\usepackage{graphviz}
+
+\newcommand{\myepigraph}[2]{\begin{savequote}[10pc]\sffamily #1 \qauthor{#2}\end{savequote}}
+\renewcommand\chapterheadstartvskip{\vspace*{-4\baselineskip}}
+
+\interfootnotelinepenalty=10000
+	
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+
+% \setlength{\epigraphrule}{0pt}
+
+\lstdefinelanguage{CSharp}
+{
+ morecomment = [l]{//}, 
+ morecomment = [l]{///},
+ morecomment = [s]{/*}{*/},
+ morestring=[b]", 
+ sensitive = true,
+ morekeywords = {abstract,  event,  new,  struct,
+   as,  explicit,  null,  switch,
+   base,  extern,  object,  this,
+   bool,  false,  operator,  throw,
+   break,  finally,  out,  true,
+   byte,  fixed,  override,  try,
+   case,  float,  params,  typeof,
+   catch,  for,  private,  uint,
+   char,  foreach,  protected,  ulong,
+   checked,  goto,  public,  unchecked,
+   class,  if,  readonly,  unsafe,
+   const,  implicit,  ref,  ushort,
+   continue,  in,  return,  using,
+   decimal,  int,  sbyte,  virtual,
+   default,  interface,  sealed,  volatile,
+   delegate,  internal,  short,  void,
+   do,  is,  sizeof,  while,
+   double,  lock,  stackalloc,   
+   else,  long,  static,   
+   enum,  namespace,  string}
+}
+
+ \lstset{
+         basicstyle=\footnotesize\ttfamily, % Standardschrift
+         commentstyle=\color[HTML]{008000},
+         %numbers=left,               % Ort der Zeilennummern
+         numberstyle=\tiny,          % Stil der Zeilennummern
+         %stepnumber=2,               % Abstand zwischen den Zeilennummern
+         numbersep=5pt,              % Abstand der Nummern zum Text
+         tabsize=2,                  % Groesse von Tabs
+         extendedchars=true,         %
+         breaklines=true,            % Zeilen werden Umgebrochen
+         keywordstyle=\color{blue},
+    		frame=b,         
+ %        keywordstyle=[1]\textbf,    % Stil der Keywords
+ %        keywordstyle=[2]\textbf,    %
+ %        keywordstyle=[3]\textbf,    %
+ %        keywordstyle=[4]\textbf,   \sqrt{\sqrt{}} %
+         stringstyle=\color{white}\ttfamily, % Farbe der String
+         showspaces=false,           % Leerzeichen anzeigen ?
+         showtabs=false,             % Tabs anzeigen ?
+         xleftmargin=17pt,
+         framexleftmargin=17pt,
+         framexrightmargin=5pt,
+         framexbottommargin=4pt,
+         %backgroundcolor=\color{lightgray},
+	columns=flexible,
+         showstringspaces=false      % Leerzeichen in Strings anzeigen ?        
+ }
+\DeclareCaptionFont{white}{\color{white}}
+\DeclareCaptionFormat{listing}{\colorbox[cmyk]{0.43, 0.35, 0.35,0.01}{\parbox{\textwidth}{\hspace{13pt}#1#2#3}}}
+\captionsetup[lstlisting]{format=listing,labelfont=white,textfont=white,singlelinecheck=false,margin=0pt,font={bf,footnotesize}}
+
+\makeatletter
+\newcommand\fs@plainruled{\def\@fs@cfont{\bfseries}\let\@fs@capt\floatc@ruled
+  \def\@fs@pre{\kern2pt}%
+  \def\@fs@post{\kern2pt\hrule\relax}%
+  \def\@fs@mid{\kern2pt}%
+  \let\@fs@iftopcapt\iftrue}
+\makeatother
+
+\floatstyle{plainruled}
+\newfloat{myalgorithm}{htbp}{loa}
+\floatname{myalgorithm}{Algorithm}
+\captionsetup[myalgorithm]{format=listing,labelfont=white,textfont=white, singlelinecheck=false, margin=0pt, font={bf,footnotesize}}
+
+\hyphenation{SymbolicObject SymbolicObjects}
+
+\mathchardef\mhyphen="2D
+
+\makeatletter
+\begingroup
+  \catcode`\-=\active
+  \def\x{\endgroup
+  \let\cs@cline\@cline
+  \expandafter\def\expandafter\@cline
+    \expandafter##\expandafter1\expandafter
+      -\expandafter##\expandafter2\expandafter\@nil\expandafter
+        {\expandafter\cs@cline\expandafter##\expandafter1\minus##2\@nil}
+}\x
+\makeatother
+
+\begin{document}
+%\maketitle
+
+\pagestyle{plain}\pagenumbering{roman}
+\selectlanguage{english}
+
+\include{00_title} 
+\include{00_acknowledgements} 
+\include{00_declaration}
+\include{00_abstract}
+
+\setcounter{tocdepth}{1}
+\tableofcontents
+
+\cleardoublepage
+\pagestyle{headings}\pagenumbering{arabic}\setcounter{page}{1}
+
+\include{01_introduction}
+\include{02_background}
+\include{03_static_program_analysis}
+\include{04_related_works}
+\include{05_design}
+\include{06_implementation}
+\include{07_testing}
+\include{08_future_work}
+\include{09_conclusion}
+
+\bibliographystyle{abbrvnat}
+\bibliography{main}
+
+\include{0a_cd}
+
+\end{document}

@@ -1,0 +1,8 @@
+digraph {
+ "field System.Object Deadlock::b" [color=red]
+ "field System.Object Deadlock::a" [color=red]
+ "field System.Object Deadlock::b" -> "field System.Object Deadlock::a" [color=red,label="Deadlock::FunctionA()+0x1f\nDeadlock::FunctionA()+0x32"]
+ "field System.Object Deadlock::a" -> "field System.Object Deadlock::b" [color=red,label="Deadlock::FunctionB()+0x1f\nDeadlock::FunctionB()+0x32"]
+ "field System.Object Deadlock::d" -> "field System.Object Deadlock::a" [label="Deadlock::FunctionB()+0xc\nDeadlock::FunctionB()+0x1f"]
+ "field System.Object Deadlock::c" -> "field System.Object Deadlock::b" [label="Deadlock::FunctionA()+0xc\nDeadlock::FunctionA()+0x1f"]
+}
